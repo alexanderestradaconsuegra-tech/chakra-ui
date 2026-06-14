@@ -274,6 +274,7 @@ class AudioEngine {
 
 /* ============================== MUNDO ================================== */
 const TILE=48, MAPW=64, MAPH=64;
+const ZOOM=1.35; // acercamiento de cámara: personajes más grandes y legibles
 const T_GRASS=0, T_TREE=1, T_BUSH=2, T_PATH=3, T_EXIT=4;
 
 class World {
@@ -299,16 +300,18 @@ class World {
     for(let y=0;y<this.h;y++){ g[this.idx(0,y)]=T_TREE; g[this.idx(this.w-1,y)]=T_TREE; }
 
     // Bosque: cúmulos de árboles con caminatas aleatorias (deja claros y senderos)
-    const clusters=120;
+    const clusters=72;
     for(let c=0;c<clusters;c++){
-      let x=randi(3,this.w-3), y=randi(3,this.h-3); const steps=randi(6,22);
+      let x=randi(3,this.w-3), y=randi(3,this.h-3); const steps=randi(5,15);
       for(let s=0;s<steps;s++){
         if(this.inb(x,y)) g[this.idx(x,y)]=T_TREE;
         x+=randi(-1,2); y+=randi(-1,2); x=clamp(x,1,this.w-2); y=clamp(y,1,this.h-2);
       }
     }
+    // Claros (zonas abiertas) para que el movimiento respire
+    for(let i=0;i<14;i++){ this._clearArea(randi(4,this.w-4), randi(4,this.h-4), randi(2,4)); }
     // Arbustos (escondites) en zonas abiertas
-    for(let i=0;i<360;i++){
+    for(let i=0;i<320;i++){
       const x=randi(2,this.w-2), y=randi(2,this.h-2);
       if(g[this.idx(x,y)]===T_GRASS) g[this.idx(x,y)]=T_BUSH;
     }
@@ -434,7 +437,8 @@ class Game {
   start(){
     this.world=new World();
     const sp=this.world.spawn;
-    this.player={ x:(sp.x+0.5)*TILE, y:(sp.y+0.5)*TILE, vx:0, vy:0, dir:0, speed:160, stamina:1, sprinting:false, hidden:false, moving:false, keys:0, alive:true };
+    this.player={ x:(sp.x+0.5)*TILE, y:(sp.y+0.5)*TILE, vx:0, vy:0, dir:0, speed:215, stamina:1, sprinting:false, hidden:false, moving:false, keys:0, alive:true };
+    this.cam=null;
     const bs=this.world.bossSpawn;
     this.boss={ x:(bs.x+0.5)*TILE, y:(bs.y+0.5)*TILE, dir:0, baseSpeed:96, speed:96, state:"PATROL",
                 target:null, path:null, pathStep:0, repath:0, lastSeen:null, alert:0, lunge:0, hammerSwing:0, footT:0 };
@@ -532,10 +536,12 @@ class Game {
     // resistencia
     if(p.sprinting && p.moving){ p.stamina=clamp(p.stamina-dt*0.42,0,1); if(p.stamina<=0) p.sprinting=false; }
     else p.stamina=clamp(p.stamina+dt*0.22,0,1);
-    const speed = p.speed * (p.sprinting?1.7:1) * (p.hidden && p.moving?0.85:1);
-    p.vx=ix*speed; p.vy=iy*speed;
-    if(mv>0.05) p.dir=Math.atan2(iy,ix);
-    this._moveEntity(p, p.vx*dt, p.vy*dt, 13);
+    const speed = p.speed * (p.sprinting?1.6:1) * (p.hidden && p.moving?0.8:1);
+    const tvx=ix*speed, tvy=iy*speed;
+    const a=1-Math.exp(-(mv>0.05?16:20)*dt); // aceleración/frenado suaves pero responsivos
+    p.vx=lerp(p.vx,tvx,a); p.vy=lerp(p.vy,tvy,a);
+    if(mv>0.05) p.dir=lerpAngle(p.dir, Math.atan2(iy,ix), 1-Math.exp(-20*dt));
+    this._moveEntity(p, p.vx*dt, p.vy*dt, 12);
 
     // ¿escondido? (sobre arbusto). Quieto = invisible; moverse = parcialmente visible
     const cx=Math.floor(p.x/TILE), cy=Math.floor(p.y/TILE);
@@ -544,7 +550,7 @@ class Game {
     if(p.hidden && !wasHidden){ this.audio.blip("hide"); this.toast("Escondido. Quédate quieto para no ser visto.",1600); }
 
     // niebla de guerra: revela alrededor
-    this._reveal(cx,cy, p.sprinting?3:4);
+    this._reveal(cx,cy, p.sprinting?5:6);
 
     // footstep particles
     p.footT-=dt;
@@ -724,24 +730,30 @@ class Game {
   /* ----------------------------- Render -------------------------------- */
   _render(dt){
     const ctx=this.ctx, W=this.cv.width, H=this.cv.height;
+    if(this.state==="menu"){ ctx.save(); this._renderMenuBg(ctx,W,H); ctx.restore(); return; }
+
+    const VW=W/ZOOM, VH=H/ZOOM; // tamaño del mundo visible
+    // cámara centrada y suavizada
+    const tcx=clamp(this.player.x - VW/2, 0, this.world.w*TILE - VW);
+    const tcy=clamp(this.player.y - VH/2, 0, this.world.h*TILE - VH);
+    if(!this.cam) this.cam={x:tcx,y:tcy};
+    const ck=1-Math.exp(-12*dt); this.cam.x=lerp(this.cam.x,tcx,ck); this.cam.y=lerp(this.cam.y,tcy,ck);
+    const camx=this.cam.x, camy=this.cam.y;
+
     ctx.save();
     if(this.shake>0.3){ ctx.translate(rand(-1,1)*this.shake, rand(-1,1)*this.shake); }
-
-    if(this.state==="menu"){ this._renderMenuBg(ctx,W,H); ctx.restore(); return; }
-
-    // cámara centrada en el jugador
-    const camx=clamp(this.player.x - W/2, 0, this.world.w*TILE - W);
-    const camy=clamp(this.player.y - H/2, 0, this.world.h*TILE - H);
+    ctx.scale(ZOOM,ZOOM);
     ctx.translate(-camx,-camy);
 
-    this._renderWorld(ctx,camx,camy,W,H);
+    this._renderWorld(ctx,camx,camy,VW,VH);
     this._renderItems(ctx);
     this._renderParticles(ctx);
     this._renderBoss(ctx);
     this._renderPlayer(ctx);
-    this._renderFog(ctx,camx,camy,W,H);
-
     ctx.restore();
+
+    // iluminación suave (linterna + niebla de guerra en degradado)
+    this._renderLighting(camx,camy,VW,VH);
 
     // flash rojo (susto/muerte)
     if(this.flash>0.02){ ctx.fillStyle=`rgba(180,0,0,${this.flash*0.5})`; ctx.fillRect(0,0,W,H); }
@@ -835,12 +847,14 @@ class Game {
     const bob=p.moving?Math.sin(t*12)*1.5:0;
     const alpha=p.hidden? (p.moving?0.65:0.4) : 1;
     ctx.globalAlpha=alpha;
+    ctx.lineWidth=2; ctx.strokeStyle="rgba(8,12,18,.85)";
+    // mochila (detrás)
+    ctx.fillStyle="#5b8f3a"; ctx.beginPath(); ctx.arc(-Math.cos(p.dir)*7,bob-Math.sin(p.dir)*5,6,0,7); ctx.fill(); ctx.stroke();
     // cuerpo (chaqueta azul)
-    ctx.fillStyle="#3a6ea5"; ctx.beginPath(); ctx.arc(0,bob,11,0,7); ctx.fill();
+    ctx.fillStyle="#4f8fd6"; ctx.beginPath(); ctx.arc(0,bob,12,0,7); ctx.fill(); ctx.stroke();
+    ctx.fillStyle="rgba(255,255,255,.18)"; ctx.beginPath(); ctx.arc(-3,bob-3,5,0,7); ctx.fill();
     // cabeza
-    ctx.fillStyle="#e8c39e"; ctx.beginPath(); ctx.arc(Math.cos(p.dir)*4,bob-6+Math.sin(p.dir)*2,6,0,7); ctx.fill();
-    // mochila
-    ctx.fillStyle="#5b8f3a"; ctx.beginPath(); ctx.arc(-Math.cos(p.dir)*6,bob-Math.sin(p.dir)*4,5,0,7); ctx.fill();
+    ctx.fillStyle="#f0cda6"; ctx.beginPath(); ctx.arc(Math.cos(p.dir)*5,bob-7+Math.sin(p.dir)*3,6.5,0,7); ctx.fill(); ctx.stroke();
     ctx.globalAlpha=1;
     if(p.hidden){ ctx.fillStyle="rgba(120,220,140,.9)"; ctx.font="9px sans-serif"; ctx.textAlign="center"; ctx.fillText("oculto",0,-20); }
     ctx.restore();
@@ -882,22 +896,49 @@ class Game {
     ctx.globalAlpha=1;
   }
 
-  // Niebla de guerra: oscurece lo no explorado y atenúa lo explorado-fuera-de-vista
-  _renderFog(ctx,camx,camy,W,H){
-    const w=this.world; const p=this.player;
-    const x0=Math.max(0,Math.floor(camx/TILE)), x1=Math.min(w.w-1,Math.floor((camx+W)/TILE));
-    const y0=Math.max(0,Math.floor(camy/TILE)), y1=Math.min(w.h-1,Math.floor((camy+H)/TILE));
-    const pcx=p.x, pcy=p.y; const vis=TILE*(this.player.sprinting?3.4:4.4);
+  // Iluminación: construye un mapa de brillo (negro=oculto, gris=recordado,
+  // halo claro=visión actual) en un lienzo aparte y lo multiplica sobre la escena.
+  _renderLighting(camx,camy,VW,VH){
+    const ctx=this.ctx, W=this.cv.width, H=this.cv.height, w=this.world, p=this.player;
+    let L=this.lightCv;
+    if(!L){ L=this.lightCv=document.createElement("canvas"); L.width=W; L.height=H; this.lctx=L.getContext("2d"); }
+    const lc=this.lctx;
+    lc.globalCompositeOperation="source-over";
+    lc.fillStyle="#000"; lc.fillRect(0,0,W,H); // oscuridad total por defecto
+
+    // memoria: celdas exploradas -> gris tenue (terreno "recordado")
+    const x0=Math.max(0,Math.floor(camx/TILE)), x1=Math.min(w.w-1,Math.floor((camx+VW)/TILE));
+    const y0=Math.max(0,Math.floor(camy/TILE)), y1=Math.min(w.h-1,Math.floor((camy+VH)/TILE));
+    lc.fillStyle="#34383f";
     for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
-      const px=x*TILE, py=y*TILE; const cxp=px+TILE/2, cyp=py+TILE/2;
-      if(!w.explored[w.idx(x,y)]){ ctx.fillStyle="rgba(3,5,7,1)"; ctx.fillRect(px,py,TILE+1,TILE+1); continue; }
-      // explorado: ¿dentro del radio de visión actual?
-      const d=dist(cxp,cyp,pcx,pcy);
-      let dark;
-      if(d<vis) dark=clamp((d-vis*0.55)/(vis*0.45),0,1)*0.55; // gradiente suave hasta el borde de la vista
-      else dark=0.78; // recordado pero a oscuras
-      if(dark>0.01){ ctx.fillStyle=`rgba(3,6,9,${dark})`; ctx.fillRect(px,py,TILE+1,TILE+1); }
+      if(!w.explored[w.idx(x,y)]) continue;
+      const sx=(x*TILE-camx)*ZOOM, sy=(y*TILE-camy)*ZOOM;
+      lc.fillRect(sx-1,sy-1,TILE*ZOOM+2,TILE*ZOOM+2);
     }
+
+    // visión actual: halo cálido degradado centrado en el jugador (aditivo)
+    lc.globalCompositeOperation="lighter";
+    const px=(p.x-camx)*ZOOM, py=(p.y-camy)*ZOOM;
+    const R=(p.sprinting?210:255)*ZOOM;
+    const halo=lc.createRadialGradient(px,py,10,px,py,R);
+    halo.addColorStop(0,"rgba(255,248,232,1)");
+    halo.addColorStop(0.5,"rgba(200,200,205,0.6)");
+    halo.addColorStop(1,"rgba(0,0,0,0)");
+    lc.fillStyle=halo; lc.beginPath(); lc.arc(px,py,R,0,7); lc.fill();
+    // brillo guía sobre llaves y portón cercanos
+    const guides=w.keys.filter(k=>!k.taken).map(k=>({x:(k.x+0.5)*TILE,y:(k.y+0.5)*TILE,c:"245,215,140"}));
+    guides.push({x:(w.exit.x+0.5)*TILE,y:(w.exit.y+0.5)*TILE,c:this.exitOpen?"140,255,180":"200,90,90"});
+    for(const gp of guides){ if(dist(gp.x,gp.y,p.x,p.y)>360) continue;
+      const sx=(gp.x-camx)*ZOOM, sy=(gp.y-camy)*ZOOM, gr=46*ZOOM;
+      const g2=lc.createRadialGradient(sx,sy,2,sx,sy,gr);
+      g2.addColorStop(0,`rgba(${gp.c},0.75)`); g2.addColorStop(1,"rgba(0,0,0,0)");
+      lc.fillStyle=g2; lc.beginPath(); lc.arc(sx,sy,gr,0,7); lc.fill(); }
+    lc.globalCompositeOperation="source-over";
+
+    // multiplica el brillo sobre la escena ya dibujada
+    ctx.globalCompositeOperation="multiply";
+    ctx.drawImage(L,0,0);
+    ctx.globalCompositeOperation="source-over";
   }
 
   _renderHUD(){
