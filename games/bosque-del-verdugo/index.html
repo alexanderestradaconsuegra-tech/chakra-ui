@@ -1,0 +1,950 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>El Bosque del Verdugo</title>
+<style>
+  :root { --accent:#e23b3b; --gold:#f5c451; }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { height:100%; background:#05070a; color:#e6e9ef; font-family:"Trebuchet MS","Segoe UI",system-ui,sans-serif; overflow:hidden; }
+  #app { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; }
+  canvas { display:block; background:#0a1410; image-rendering:pixelated; touch-action:none; }
+
+  /* ---- Overlays ---- */
+  .screen {
+    position:absolute; inset:0; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center;
+    background:radial-gradient(ellipse at center, rgba(10,16,12,.82), rgba(2,3,5,.97));
+    z-index:10; padding:24px; backdrop-filter:blur(2px);
+  }
+  .screen.hidden { display:none; }
+  h1 { font-size:clamp(34px,7vw,72px); letter-spacing:2px; line-height:1;
+       color:#f3ede0; text-shadow:0 0 18px rgba(226,59,59,.55), 0 4px 0 #220606; }
+  h1 .sub { display:block; font-size:.34em; letter-spacing:8px; color:var(--accent); margin-top:10px; }
+  .panel { max-width:680px; }
+  p.lead { margin:18px auto 6px; max-width:560px; color:#b9c0cb; font-size:16px; line-height:1.55; }
+  .controls { display:flex; flex-wrap:wrap; gap:10px 18px; justify-content:center; margin:22px auto 8px; max-width:560px; }
+  .key { background:#141b22; border:1px solid #2a3742; border-radius:8px; padding:8px 12px; font-size:13px; color:#cfd6df; }
+  .key b { color:var(--gold); }
+  button.cta {
+    margin-top:26px; cursor:pointer; font:inherit; font-size:20px; font-weight:bold; letter-spacing:1px;
+    color:#1a0606; background:linear-gradient(180deg,#ff5b5b,#c52121); border:none; border-radius:12px;
+    padding:16px 42px; box-shadow:0 8px 0 #5e0f0f, 0 12px 28px rgba(226,59,59,.4); transition:transform .08s, box-shadow .08s;
+  }
+  button.cta:active { transform:translateY(5px); box-shadow:0 3px 0 #5e0f0f, 0 6px 14px rgba(226,59,59,.4); }
+  .hint { margin-top:22px; color:#6b7682; font-size:13px; }
+  .endTitle.win { color:var(--gold); text-shadow:0 0 22px rgba(245,196,81,.6); }
+  .endTitle.lose { color:var(--accent); text-shadow:0 0 22px rgba(226,59,59,.6); }
+  .stats { margin:14px 0 4px; color:#aab2bd; font-size:15px; }
+
+  /* ---- HUD ---- */
+  #hud { position:absolute; inset:0; pointer-events:none; z-index:5; }
+  .vignette { position:absolute; inset:0; box-shadow:inset 0 0 220px 40px rgba(0,0,0,.9); pointer-events:none; transition:box-shadow .25s; }
+  .topbar { position:absolute; top:14px; left:50%; transform:translateX(-50%); display:flex; gap:18px; align-items:center;
+            background:rgba(8,12,16,.6); border:1px solid #1d272f; border-radius:30px; padding:8px 18px; backdrop-filter:blur(4px); }
+  .keychip { display:flex; align-items:center; gap:6px; font-size:14px; font-weight:bold; color:#7a8590; }
+  .keychip.has { color:var(--gold); text-shadow:0 0 10px rgba(245,196,81,.5); }
+  .keychip .dot { width:11px; height:11px; border-radius:50%; background:#39434d; box-shadow:inset 0 0 0 2px #222b33; }
+  .keychip.has .dot { background:var(--gold); box-shadow:0 0 10px var(--gold); }
+  .stamina-wrap { position:absolute; bottom:18px; left:50%; transform:translateX(-50%); width:240px; }
+  .stamina-bar { height:8px; border-radius:6px; background:#1a232b; overflow:hidden; border:1px solid #263039; }
+  .stamina-fill { height:100%; width:100%; background:linear-gradient(90deg,#36d399,#7bf0c2); transition:width .08s linear; }
+  .stamina-fill.tired { background:linear-gradient(90deg,#d35e36,#f0b27b); }
+  .stamina-label { text-align:center; font-size:11px; letter-spacing:2px; color:#5e6872; margin-top:5px; }
+  #danger-label { position:absolute; top:60px; left:50%; transform:translateX(-50%); font-size:13px; letter-spacing:4px;
+                  font-weight:bold; color:var(--accent); opacity:0; transition:opacity .3s; text-shadow:0 0 14px rgba(226,59,59,.8); }
+  #toast { position:absolute; bottom:64px; left:50%; transform:translateX(-50%); background:rgba(8,12,16,.85);
+           border:1px solid #2a3742; border-radius:10px; padding:10px 18px; font-size:14px; color:#e6e9ef; opacity:0;
+           transition:opacity .35s, transform .35s; pointer-events:none; }
+  #toast.show { opacity:1; transform:translateX(-50%) translateY(-6px); }
+  #minimap { position:absolute; top:14px; right:14px; border:1px solid #1d272f; border-radius:8px; background:rgba(5,8,10,.7); }
+  /* touch controls */
+  #touch { position:absolute; inset:0; z-index:6; pointer-events:none; display:none; }
+  #touch.on { display:block; }
+  .pad { position:absolute; bottom:26px; left:26px; width:150px; height:150px; pointer-events:auto; }
+  .nub { position:absolute; left:50%; top:50%; width:62px; height:62px; margin:-31px; border-radius:50%;
+         background:rgba(245,196,81,.35); border:2px solid rgba(245,196,81,.7); }
+  .ring { position:absolute; inset:0; border-radius:50%; background:rgba(255,255,255,.06); border:2px solid rgba(255,255,255,.18); }
+  #btnAction { position:absolute; bottom:42px; right:30px; width:90px; height:90px; border-radius:50%; pointer-events:auto;
+               background:rgba(54,211,153,.25); border:2px solid rgba(54,211,153,.7); color:#bff5dd; font-weight:bold;
+               display:flex; align-items:center; justify-content:center; font-size:13px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="game" width="960" height="600"></canvas>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="vignette" id="vignette"></div>
+    <canvas id="minimap" width="150" height="150"></canvas>
+    <div class="topbar">
+      <div class="keychip" data-k="0"><span class="dot"></span>Llave I</div>
+      <div class="keychip" data-k="1"><span class="dot"></span>Llave II</div>
+      <div class="keychip" data-k="2"><span class="dot"></span>Llave III</div>
+    </div>
+    <div id="danger-label">● EL VERDUGO TE VIO ●</div>
+    <div id="toast"></div>
+    <div class="stamina-wrap">
+      <div class="stamina-bar"><div class="stamina-fill" id="stamina"></div></div>
+      <div class="stamina-label">RESISTENCIA</div>
+    </div>
+  </div>
+
+  <!-- Touch controls -->
+  <div id="touch">
+    <div class="pad" id="pad"><div class="ring"></div><div class="nub" id="nub"></div></div>
+    <div id="btnAction">USAR</div>
+  </div>
+
+  <!-- Start screen -->
+  <div class="screen" id="startScreen">
+    <div class="panel">
+      <h1>EL BOSQUE<span class="sub">DEL VERDUGO</span></h1>
+      <p class="lead">Despiertas perdido en un bosque sin fin. <b style="color:#f3a6a6">El Verdugo</b> —una mole con un martillo gigante— patrulla entre los árboles. Reúne las <b style="color:var(--gold)">3 llaves</b> ocultas, alcanza el <b>Portón de Salida</b> y escapa. Si oyes los latidos acelerarse… corre o escóndete.</p>
+      <div class="controls">
+        <span class="key"><b>W A S D</b> / Flechas — Moverse</span>
+        <span class="key"><b>Shift</b> — Esprintar (gasta resistencia)</span>
+        <span class="key"><b>E / Espacio</b> — Recoger / Abrir</span>
+        <span class="key"><b>En arbustos</b> — Te escondes (¡quédate quieto!)</span>
+      </div>
+      <button class="cta" id="startBtn">ENTRAR AL BOSQUE</button>
+      <div class="hint">Usa auriculares 🎧 — la música procedural reacciona a la cercanía del Verdugo.</div>
+    </div>
+  </div>
+
+  <!-- End screen -->
+  <div class="screen hidden" id="endScreen">
+    <div class="panel">
+      <div class="endTitle" id="endTitle"></div>
+      <div class="stats" id="endStats"></div>
+      <p class="lead" id="endText"></p>
+      <button class="cta" id="retryBtn">VOLVER A INTENTAR</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* =========================================================================
+   EL BOSQUE DEL VERDUGO
+   Juego de terror 2D top-down — Canvas + Web Audio API (sin dependencias).
+   Arquitectura:
+     - AudioEngine : música de suspenso procedural (drone + cuerdas + latidos
+                     con tempo adaptativo) y SFX. La intensidad la controla
+                     `danger` (0..1) derivado de la cercanía/estado del jefe.
+     - World       : generación procedural del bosque, A* y niebla de guerra.
+     - Player      : movimiento, colisión, resistencia, sigilo.
+     - Boss(Verdugo): máquina de estados PATROL / HUNT / SEARCH con visión
+                      (rango + cono + línea de visión) y pathfinding A*.
+   ========================================================================= */
+
+/* ----------------------------- Utilidades ------------------------------ */
+const clamp = (v,a,b)=>v<a?a:v>b?b:v;
+const lerp  = (a,b,t)=>a+(b-a)*t;
+const dist2 = (ax,ay,bx,by)=>{const dx=ax-bx,dy=ay-by;return dx*dx+dy*dy;};
+const dist  = (ax,ay,bx,by)=>Math.hypot(ax-bx,ay-by);
+const rand  = (a,b)=>a+Math.random()*(b-a);
+const randi = (a,b)=>Math.floor(rand(a,b));
+const now   = ()=>performance.now()/1000;
+
+/* ============================== AUDIO ================================== */
+class AudioEngine {
+  constructor(){ this.ctx=null; this.ready=false; this.danger=0; this.muted=false; }
+  init(){
+    if(this.ctx) return;
+    const AC = window.AudioContext||window.webkitAudioContext;
+    this.ctx = new AC();
+    const ctx=this.ctx;
+
+    this.master = ctx.createGain(); this.master.gain.value=0.9; this.master.connect(ctx.destination);
+
+    // --- Drone grave (pad de tensión, siempre presente, sube con el peligro)
+    this.droneGain = ctx.createGain(); this.droneGain.gain.value=0.0; this.droneGain.connect(this.master);
+    this.droneFilter = ctx.createBiquadFilter(); this.droneFilter.type="lowpass"; this.droneFilter.frequency.value=320;
+    this.droneFilter.connect(this.droneGain);
+    [55, 55.4, 82.5].forEach(f=>{ // dos detuneados + una quinta -> inquietante
+      const o=ctx.createOscillator(); o.type="sawtooth"; o.frequency.value=f;
+      const g=ctx.createGain(); g.gain.value=0.33; o.connect(g); g.connect(this.droneFilter); o.start();
+    });
+
+    // --- Cluster de "cuerdas" disonantes que entran con peligro alto
+    this.strGain = ctx.createGain(); this.strGain.gain.value=0; this.strGain.connect(this.master);
+    this.strFilter = ctx.createBiquadFilter(); this.strFilter.type="bandpass"; this.strFilter.frequency.value=900; this.strFilter.Q.value=0.7;
+    this.strFilter.connect(this.strGain);
+    [220, 233.08, 311.13].forEach(f=>{ // menor 2da + tritono => muy tenso
+      const o=ctx.createOscillator(); o.type="sawtooth"; o.frequency.value=f;
+      const lfo=ctx.createOscillator(); lfo.frequency.value=rand(4,6.5); const lg=ctx.createGain(); lg.gain.value=3.5;
+      lfo.connect(lg); lg.connect(o.detune); lfo.start();
+      const g=ctx.createGain(); g.gain.value=0.25; o.connect(g); g.connect(this.strFilter); o.start();
+    });
+
+    // --- Ambiente del bosque (ruido filtrado tipo viento, suave)
+    const noiseBuf = ctx.createBuffer(1, ctx.sampleRate*2, ctx.sampleRate);
+    const nd = noiseBuf.getChannelData(0); for(let i=0;i<nd.length;i++) nd[i]=Math.random()*2-1;
+    this.wind = ctx.createBufferSource(); this.wind.buffer=noiseBuf; this.wind.loop=true;
+    const windF = ctx.createBiquadFilter(); windF.type="lowpass"; windF.frequency.value=420;
+    this.windGain = ctx.createGain(); this.windGain.gain.value=0.05;
+    this.wind.connect(windF); windF.connect(this.windGain); this.windGain.connect(this.master); this.wind.start();
+
+    // --- Scheduler de latidos (corazón) con lookahead
+    this.beatGain = ctx.createGain(); this.beatGain.gain.value=0.0; this.beatGain.connect(this.master);
+    this.nextBeat = ctx.currentTime + 0.2;
+    this.ready=true;
+    this._schedule();
+  }
+  resume(){ if(this.ctx && this.ctx.state==="suspended") this.ctx.resume(); }
+
+  _heart(t, vol){
+    const ctx=this.ctx;
+    const thump=(at,gain)=>{
+      const o=ctx.createOscillator(); o.type="sine";
+      o.frequency.setValueAtTime(85,at); o.frequency.exponentialRampToValueAtTime(38,at+0.13);
+      const g=ctx.createGain(); g.gain.setValueAtTime(0.0001,at);
+      g.gain.exponentialRampToValueAtTime(gain,at+0.012); g.gain.exponentialRampToValueAtTime(0.0001,at+0.2);
+      o.connect(g); g.connect(this.beatGain); o.start(at); o.stop(at+0.24);
+    };
+    thump(t, vol); thump(t+0.16, vol*0.62); // lub-dub
+  }
+  _schedule(){
+    if(!this.ready) return;
+    const ctx=this.ctx, look=ctx.currentTime+0.15;
+    while(this.nextBeat < look){
+      const d=this.danger;
+      // BPM: de 48 (calma) a 165 (terror). El intervalo entre latidos se acorta.
+      const bpm = lerp(48, 165, Math.pow(d,0.85));
+      const vol = lerp(0.12, 1.05, d);
+      if(d>0.04) this._heart(this.nextBeat, vol);
+      this.nextBeat += 60/bpm;
+    }
+    setTimeout(()=>this._schedule(), 40);
+  }
+  // Llamado cada frame con el nivel de peligro objetivo (0..1)
+  setDanger(d){
+    this.danger = d = clamp(d,0,1);
+    if(!this.ready) return;
+    const ct=this.ctx.currentTime, T=0.12;
+    this.beatGain.gain.setTargetAtTime(this.muted?0:1, ct, T);
+    this.droneGain.gain.setTargetAtTime(this.muted?0:lerp(0.05,0.5,d), ct, T);
+    this.droneFilter.frequency.setTargetAtTime(lerp(260,1200,d), ct, T);
+    this.strGain.gain.setTargetAtTime(this.muted?0:lerp(0,0.4,Math.max(0,d-0.45)/0.55), ct, T);
+    this.windGain.gain.setTargetAtTime(this.muted?0:lerp(0.06,0.015,d), ct, T);
+  }
+  // SFX puntuales
+  blip(type){
+    if(!this.ready||this.muted) return; const ctx=this.ctx, t=ctx.currentTime;
+    if(type==="key"){ this._tone(880,t,0.0,0.5); this._tone(1320,t+0.08,0.0,0.4); this._tone(1760,t+0.16,0.0,0.5); }
+    else if(type==="unlock"){ this._tone(160,t,0.0,0.25,"square"); this._tone(330,t+0.12,0,0.3); this._tone(660,t+0.26,0,0.5); }
+    else if(type==="locked"){ this._tone(120,t,0,0.18,"square"); this._tone(90,t+0.1,0,0.2,"square"); }
+    else if(type==="hide"){ this._noiseHit(0.18,600); }
+  }
+  _tone(freq,at,delay,dur,type="triangle",vol=0.35){
+    const ctx=this.ctx; const o=ctx.createOscillator(); o.type=type; o.frequency.value=freq;
+    const g=ctx.createGain(); g.gain.setValueAtTime(0.0001,at); g.gain.exponentialRampToValueAtTime(vol,at+0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001,at+dur); o.connect(g); g.connect(this.master); o.start(at); o.stop(at+dur+0.05);
+  }
+  _noiseHit(dur,cut){
+    const ctx=this.ctx, t=ctx.currentTime; const len=Math.floor(ctx.sampleRate*dur);
+    const b=ctx.createBuffer(1,len,ctx.sampleRate); const d=b.getChannelData(0);
+    for(let i=0;i<len;i++) d[i]=(Math.random()*2-1)*(1-i/len);
+    const s=ctx.createBufferSource(); s.buffer=b; const f=ctx.createBiquadFilter(); f.type="lowpass"; f.frequency.value=cut;
+    const g=ctx.createGain(); g.gain.value=0.4; s.connect(f); f.connect(g); g.connect(this.master); s.start(t);
+  }
+  stinger(){ // "¡te vio!" — barrido ascendente + golpe
+    if(!this.ready||this.muted) return; const ctx=this.ctx, t=ctx.currentTime;
+    const o=ctx.createOscillator(); o.type="sawtooth"; o.frequency.setValueAtTime(180,t); o.frequency.exponentialRampToValueAtTime(1400,t+0.5);
+    const g=ctx.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.5,t+0.05); g.gain.exponentialRampToValueAtTime(0.0001,t+0.7);
+    const f=ctx.createBiquadFilter(); f.type="highpass"; f.frequency.value=200;
+    o.connect(f); f.connect(g); g.connect(this.master); o.start(t); o.stop(t+0.75);
+    this._noiseHit(0.4,2200);
+  }
+  hammer(){ // golpe de martillo (muerte)
+    if(!this.ready||this.muted) return; const ctx=this.ctx, t=ctx.currentTime;
+    const o=ctx.createOscillator(); o.type="sine"; o.frequency.setValueAtTime(140,t); o.frequency.exponentialRampToValueAtTime(28,t+0.5);
+    const g=ctx.createGain(); g.gain.setValueAtTime(0.9,t); g.gain.exponentialRampToValueAtTime(0.0001,t+0.9);
+    o.connect(g); g.connect(this.master); o.start(t); o.stop(t+1);
+    this._noiseHit(0.5,500);
+  }
+  victory(){
+    if(!this.ready||this.muted) return; const ctx=this.ctx, t=ctx.currentTime;
+    [523,659,784,1047].forEach((f,i)=>this._tone(f,t+i*0.14,0,0.6,"triangle",0.4));
+  }
+}
+
+/* ============================== MUNDO ================================== */
+const TILE=48, MAPW=64, MAPH=64;
+const T_GRASS=0, T_TREE=1, T_BUSH=2, T_PATH=3, T_EXIT=4;
+
+class World {
+  constructor(){
+    this.w=MAPW; this.h=MAPH;
+    this.grid=new Uint8Array(MAPW*MAPH);
+    this.explored=new Uint8Array(MAPW*MAPH);
+    this.decor=new Float32Array(MAPW*MAPH); // semilla visual por celda
+    this.generate();
+  }
+  idx(x,y){ return y*this.w+x; }
+  inb(x,y){ return x>=0&&y>=0&&x<this.w&&y<this.h; }
+  get(x,y){ return this.inb(x,y)?this.grid[this.idx(x,y)]:T_TREE; }
+  solid(x,y){ return this.get(x,y)===T_TREE; }
+  walkableCell(x,y){ return this.inb(x,y) && this.grid[this.idx(x,y)]!==T_TREE; }
+
+  generate(){
+    const g=this.grid; g.fill(T_GRASS);
+    for(let i=0;i<g.length;i++) this.decor[i]=Math.random();
+
+    // Muralla de árboles en el borde (con un hueco para el portón)
+    for(let x=0;x<this.w;x++){ g[this.idx(x,0)]=T_TREE; g[this.idx(x,this.h-1)]=T_TREE; }
+    for(let y=0;y<this.h;y++){ g[this.idx(0,y)]=T_TREE; g[this.idx(this.w-1,y)]=T_TREE; }
+
+    // Bosque: cúmulos de árboles con caminatas aleatorias (deja claros y senderos)
+    const clusters=120;
+    for(let c=0;c<clusters;c++){
+      let x=randi(3,this.w-3), y=randi(3,this.h-3); const steps=randi(6,22);
+      for(let s=0;s<steps;s++){
+        if(this.inb(x,y)) g[this.idx(x,y)]=T_TREE;
+        x+=randi(-1,2); y+=randi(-1,2); x=clamp(x,1,this.w-2); y=clamp(y,1,this.h-2);
+      }
+    }
+    // Arbustos (escondites) en zonas abiertas
+    for(let i=0;i<360;i++){
+      const x=randi(2,this.w-2), y=randi(2,this.h-2);
+      if(g[this.idx(x,y)]===T_GRASS) g[this.idx(x,y)]=T_BUSH;
+    }
+
+    // Spawn del jugador: centro despejado
+    this.spawn={x:(this.w>>1), y:(this.h>>1)};
+    this._clearArea(this.spawn.x, this.spawn.y, 2);
+
+    // Portón de salida en un borde aleatorio (lejos del centro)
+    const side=randi(0,4); let ex,ey;
+    if(side===0){ ex=randi(6,this.w-6); ey=0; }
+    else if(side===1){ ex=randi(6,this.w-6); ey=this.h-1; }
+    else if(side===2){ ex=0; ey=randi(6,this.h-6); }
+    else { ex=this.w-1; ey=randi(6,this.h-6); }
+    this.exit={x:ex,y:ey};
+    g[this.idx(ex,ey)]=T_EXIT;
+    // despeja una antesala frente al portón
+    const ix=clamp(ex,1,this.w-2), iy=clamp(ey,1,this.h-2);
+    this._clearArea(ix,iy,2);
+
+    // 3 llaves repartidas en cuadrantes lejanos al spawn
+    this.keys=[];
+    const quad=[[0.22,0.22],[0.8,0.28],[0.3,0.82]];
+    // baraja para que no siempre sea igual
+    for(let i=quad.length-1;i>0;i--){ const j=randi(0,i+1); [quad[i],quad[j]]=[quad[j],quad[i]]; }
+    for(const q of quad){
+      let kx=clamp(Math.round(q[0]*this.w)+randi(-4,5),2,this.w-3);
+      let ky=clamp(Math.round(q[1]*this.h)+randi(-4,5),2,this.h-3);
+      this._clearArea(kx,ky,1);
+      this.keys.push({x:kx,y:ky,taken:false});
+    }
+
+    // Garantiza conectividad: BFS desde spawn; si algo es inalcanzable, abre túnel
+    this._ensureReachable(this.spawn, this.keys.map(k=>({x:k.x,y:k.y})).concat([{x:ix,y:iy}]));
+
+    // Punto de patrulla inicial del jefe: lejos del jugador
+    this.bossSpawn={x:clamp(this.w-this.spawn.x,2,this.w-3), y:clamp(this.spawn.y+8,2,this.h-3)};
+    this._clearArea(this.bossSpawn.x,this.bossSpawn.y,1);
+  }
+  _clearArea(cx,cy,r){
+    for(let y=cy-r;y<=cy+r;y++)for(let x=cx-r;x<=cx+r;x++)
+      if(this.inb(x,y) && this.grid[this.idx(x,y)]===T_TREE) this.grid[this.idx(x,y)]=T_GRASS;
+  }
+  _ensureReachable(start, targets){
+    const reach=this._flood(start);
+    for(const t of targets){
+      if(!reach[this.idx(t.x,t.y)]) this._carve(start,t);
+    }
+  }
+  _flood(start){
+    const seen=new Uint8Array(this.grid.length); const q=[[start.x,start.y]]; seen[this.idx(start.x,start.y)]=1;
+    const dirs=[[1,0],[-1,0],[0,1],[0,-1]];
+    while(q.length){ const [x,y]=q.pop();
+      for(const [dx,dy] of dirs){ const nx=x+dx, ny=y+dy;
+        if(this.walkableCell(nx,ny) && !seen[this.idx(nx,ny)]){ seen[this.idx(nx,ny)]=1; q.push([nx,ny]); } } }
+    return seen;
+  }
+  _carve(a,b){ // túnel en L despejando árboles
+    let x=a.x,y=a.y;
+    while(x!==b.x){ x+=Math.sign(b.x-x); if(this.grid[this.idx(x,y)]===T_TREE) this.grid[this.idx(x,y)]=T_PATH; }
+    while(y!==b.y){ y+=Math.sign(b.y-y); if(this.grid[this.idx(x,y)]===T_TREE) this.grid[this.idx(x,y)]=T_PATH; }
+  }
+
+  // --- Línea de visión (Bresenham): ¿hay árboles entre dos celdas?
+  lineClear(x0,y0,x1,y1){
+    let dx=Math.abs(x1-x0), dy=Math.abs(y1-y0), sx=x0<x1?1:-1, sy=y0<y1?1:-1, err=dx-dy;
+    while(true){
+      if((x0!==x1||y0!==y1) && this.solid(x0,y0)) return false;
+      if(x0===x1&&y0===y1) return true;
+      const e2=2*err; if(e2>-dy){ err-=dy; x0+=sx; } if(e2<dx){ err+=dx; y0+=sy; }
+    }
+  }
+
+  // --- A* sobre celdas caminables
+  astar(sx,sy,tx,ty){
+    if(!this.walkableCell(tx,ty)||!this.walkableCell(sx,sy)) return null;
+    const W=this.w, H=this.h, N=W*H;
+    const open=new MinHeap(); const came=new Int32Array(N).fill(-1);
+    const gScore=new Float32Array(N).fill(Infinity); const closed=new Uint8Array(N);
+    const s=sy*W+sx, t=ty*W+tx; gScore[s]=0; open.push(s, this._h(sx,sy,tx,ty));
+    const dirs=[[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],[1,1,1.41],[1,-1,1.41],[-1,1,1.41],[-1,-1,1.41]];
+    let guard=0;
+    while(open.size && guard++<20000){
+      const cur=open.pop(); if(cur===t){ return this._rebuild(came,cur,W); }
+      if(closed[cur]) continue; closed[cur]=1;
+      const cx=cur%W, cy=(cur/W)|0;
+      for(const [dx,dy,cost] of dirs){
+        const nx=cx+dx, ny=cy+dy; if(!this.walkableCell(nx,ny)) continue;
+        if(cost>1 && (this.solid(cx+dx,cy)||this.solid(cx,cy+dy))) continue; // sin cortar esquinas
+        const ni=ny*W+nx; if(closed[ni]) continue;
+        const ng=gScore[cur]+cost;
+        if(ng<gScore[ni]){ gScore[ni]=ng; came[ni]=cur; open.push(ni, ng+this._h(nx,ny,tx,ty)); }
+      }
+    }
+    return null;
+  }
+  _h(x,y,tx,ty){ const dx=Math.abs(x-tx),dy=Math.abs(y-ty); return (dx+dy)+(1.41-2)*Math.min(dx,dy); }
+  _rebuild(came,cur,W){ const path=[]; while(cur!==-1){ path.push({x:cur%W,y:(cur/W)|0}); cur=came[cur]; } return path.reverse(); }
+}
+
+/* Min-heap binario para A* */
+class MinHeap{
+  constructor(){ this.ids=[]; this.pr=[]; this.size=0; }
+  push(id,p){ this.ids[this.size]=id; this.pr[this.size]=p; let i=this.size++;
+    while(i>0){ const par=(i-1)>>1; if(this.pr[par]<=this.pr[i])break; this._sw(i,par); i=par; } }
+  pop(){ const top=this.ids[0]; this.size--; if(this.size>0){ this.ids[0]=this.ids[this.size]; this.pr[0]=this.pr[this.size]; this._down(0);} return top; }
+  _down(i){ for(;;){ let l=2*i+1,r=l+1,s=i; if(l<this.size&&this.pr[l]<this.pr[s])s=l; if(r<this.size&&this.pr[r]<this.pr[s])s=r; if(s===i)break; this._sw(i,s); i=s; } }
+  _sw(a,b){ const ti=this.ids[a]; this.ids[a]=this.ids[b]; this.ids[b]=ti; const tp=this.pr[a]; this.pr[a]=this.pr[b]; this.pr[b]=tp; }
+}
+
+/* ============================== JUEGO ================================== */
+class Game {
+  constructor(){
+    this.cv=document.getElementById("game"); this.ctx=this.cv.getContext("2d");
+    this.mini=document.getElementById("minimap"); this.mctx=this.mini.getContext("2d");
+    this.audio=new AudioEngine();
+    this.keys={}; this.input={x:0,y:0}; this.touch={active:false,x:0,y:0};
+    this.state="menu"; this.danger=0; this.shake=0; this.flash=0; this.t=0;
+    this._bindInput();
+    this._loop=this._loop.bind(this); requestAnimationFrame(this._loop);
+  }
+
+  start(){
+    this.world=new World();
+    const sp=this.world.spawn;
+    this.player={ x:(sp.x+0.5)*TILE, y:(sp.y+0.5)*TILE, vx:0, vy:0, dir:0, speed:160, stamina:1, sprinting:false, hidden:false, moving:false, keys:0, alive:true };
+    const bs=this.world.bossSpawn;
+    this.boss={ x:(bs.x+0.5)*TILE, y:(bs.y+0.5)*TILE, dir:0, baseSpeed:96, speed:96, state:"PATROL",
+                target:null, path:null, pathStep:0, repath:0, lastSeen:null, alert:0, lunge:0, hammerSwing:0, footT:0 };
+    this.keysLeft=this.world.keys.length;
+    this.exitOpen=false; this.elapsed=0; this.danger=0; this.shake=0; this.flash=0;
+    this.particles=[];
+    this.state="play";
+    this.audio.init(); this.audio.resume();
+    document.getElementById("startScreen").classList.add("hidden");
+    document.getElementById("endScreen").classList.add("hidden");
+    this.toast("Encuentra las 3 llaves...", 2600);
+    this._syncKeyHUD();
+  }
+
+  /* ----------------------------- Input ------------------------------- */
+  _bindInput(){
+    const press=(code,val)=>{
+      const map={KeyW:"up",ArrowUp:"up",KeyS:"down",ArrowDown:"down",KeyA:"left",ArrowLeft:"left",KeyD:"right",ArrowRight:"right"};
+      if(map[code]!==undefined) this.keys[map[code]]=val;
+      if((code==="ShiftLeft"||code==="ShiftRight")) this.keys.sprint=val;
+      if(val && (code==="KeyE"||code==="Space")) this._interact();
+    };
+    window.addEventListener("keydown",e=>{ if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Space"].includes(e.code)) e.preventDefault(); press(e.code,true); });
+    window.addEventListener("keyup",e=>press(e.code,false));
+
+    document.getElementById("startBtn").onclick=()=>this.start();
+    document.getElementById("retryBtn").onclick=()=>this.start();
+
+    // Controles táctiles
+    if("ontouchstart" in window){
+      document.getElementById("touch").classList.add("on");
+      const pad=document.getElementById("pad"), nub=document.getElementById("nub");
+      const center=()=>{ const r=pad.getBoundingClientRect(); return {x:r.left+r.width/2, y:r.top+r.height/2, R:r.width/2}; };
+      const move=(t)=>{ const c=center(); let dx=t.clientX-c.x, dy=t.clientY-c.y; const m=Math.hypot(dx,dy)||1;
+        const k=Math.min(1,m/c.R); dx=dx/m*k; dy=dy/m*k; this.touch={active:true,x:dx,y:dy};
+        nub.style.transform=`translate(${dx*c.R*0.7}px,${dy*c.R*0.7}px)`; };
+      pad.addEventListener("touchstart",e=>{e.preventDefault(); move(e.touches[0]);},{passive:false});
+      pad.addEventListener("touchmove",e=>{e.preventDefault(); move(e.touches[0]);},{passive:false});
+      pad.addEventListener("touchend",e=>{e.preventDefault(); this.touch={active:false,x:0,y:0}; nub.style.transform="";},{passive:false});
+      document.getElementById("btnAction").addEventListener("touchstart",e=>{e.preventDefault(); this._interact();},{passive:false});
+    }
+    // Resize/scale del canvas para llenar pantalla manteniendo proporción
+    const fit=()=>{ const s=Math.min(window.innerWidth/960, window.innerHeight/600);
+      this.cv.style.width=960*s+"px"; this.cv.style.height=600*s+"px"; };
+    window.addEventListener("resize",fit); fit();
+  }
+  _readInput(){
+    let x=0,y=0;
+    if(this.keys.left)x-=1; if(this.keys.right)x+=1; if(this.keys.up)y-=1; if(this.keys.down)y+=1;
+    if(this.touch.active){ x=this.touch.x; y=this.touch.y; }
+    const m=Math.hypot(x,y); if(m>1){ x/=m; y/=m; }
+    this.input.x=x; this.input.y=y;
+    this.player && (this.player.sprinting = !!this.keys.sprint && this.player.stamina>0.02 && (x||y));
+  }
+  _interact(){
+    if(this.state!=="play"||!this.player) return;
+    const p=this.player, w=this.world;
+    // ¿llave cerca?
+    for(const k of w.keys){ if(!k.taken){ const kx=(k.x+0.5)*TILE, ky=(k.y+0.5)*TILE;
+      if(dist(p.x,p.y,kx,ky)<TILE*1.1){ k.taken=true; p.keys++; this.keysLeft--; this.audio.blip("key");
+        this._burst(kx,ky,"#f5c451",22); this._syncKeyHUD();
+        if(this.keysLeft>0){ this.toast(`Llave recogida (${p.keys}/3). El Verdugo se enfurece...`,2600); }
+        else { this.toast("¡3/3 llaves! Corre al PORTÓN para escapar.",3200); this.exitOpen=true; }
+        // el jefe acelera con cada llave
+        this.boss.baseSpeed += 11; return; } } }
+    // ¿portón cerca?
+    const ex=(w.exit.x+0.5)*TILE, ey=(w.exit.y+0.5)*TILE;
+    if(dist(p.x,p.y,ex,ey)<TILE*1.4){
+      if(this.exitOpen){ this._win(); }
+      else { this.audio.blip("locked"); this.toast(`El portón está sellado. Faltan ${this.keysLeft} llave(s).`,2200); }
+    }
+  }
+
+  /* --------------------------- Bucle ---------------------------------- */
+  _loop(ts){
+    const tNow=ts/1000; const dt=Math.min(0.033, this._last?tNow-this._last:0.016); this._last=tNow; this.t=tNow;
+    if(this.state==="play"){ this._update(dt); }
+    this._render(dt);
+    requestAnimationFrame(this._loop);
+  }
+
+  _update(dt){
+    this.elapsed+=dt; this._readInput();
+    this._updatePlayer(dt);
+    this._updateBoss(dt);
+    this._updateDanger(dt);
+    this._updateParticles(dt);
+    this.shake*=Math.pow(0.0008,dt); this.flash*=Math.pow(0.02,dt);
+  }
+
+  _updatePlayer(dt){
+    const p=this.player, w=this.world;
+    const ix=this.input.x, iy=this.input.y; const mv=Math.hypot(ix,iy);
+    p.moving = mv>0.05;
+    // resistencia
+    if(p.sprinting && p.moving){ p.stamina=clamp(p.stamina-dt*0.42,0,1); if(p.stamina<=0) p.sprinting=false; }
+    else p.stamina=clamp(p.stamina+dt*0.22,0,1);
+    const speed = p.speed * (p.sprinting?1.7:1) * (p.hidden && p.moving?0.85:1);
+    p.vx=ix*speed; p.vy=iy*speed;
+    if(mv>0.05) p.dir=Math.atan2(iy,ix);
+    this._moveEntity(p, p.vx*dt, p.vy*dt, 13);
+
+    // ¿escondido? (sobre arbusto). Quieto = invisible; moverse = parcialmente visible
+    const cx=Math.floor(p.x/TILE), cy=Math.floor(p.y/TILE);
+    const wasHidden=p.hidden;
+    p.hidden = w.get(cx,cy)===T_BUSH;
+    if(p.hidden && !wasHidden){ this.audio.blip("hide"); this.toast("Escondido. Quédate quieto para no ser visto.",1600); }
+
+    // niebla de guerra: revela alrededor
+    this._reveal(cx,cy, p.sprinting?3:4);
+
+    // footstep particles
+    p.footT-=dt;
+    if(p.moving && p.footT<=0){ p.footT=p.sprinting?0.12:0.2; this._dust(p.x,p.y); }
+  }
+
+  _reveal(cx,cy,r){
+    const w=this.world;
+    for(let y=cy-r;y<=cy+r;y++)for(let x=cx-r;x<=cx+r;x++){
+      if(!w.inb(x,y)) continue;
+      if(dist2(x+0.5,y+0.5,cx+0.5,cy+0.5)<=(r+0.5)*(r+0.5)) w.explored[w.idx(x,y)]=1;
+    }
+  }
+
+  _moveEntity(e,dx,dy,radius){
+    // colisión separada por eje contra celdas-árbol
+    const tryMove=(nx,ny)=>{
+      const minx=Math.floor((nx-radius)/TILE), maxx=Math.floor((nx+radius)/TILE);
+      const miny=Math.floor((ny-radius)/TILE), maxy=Math.floor((ny+radius)/TILE);
+      for(let cy=miny;cy<=maxy;cy++)for(let cx=minx;cx<=maxx;cx++){
+        if(this.world.solid(cx,cy)){
+          const rx=clamp(nx,cx*TILE,cx*TILE+TILE), ry=clamp(ny,cy*TILE,cy*TILE+TILE);
+          if(dist2(nx,ny,rx,ry) < radius*radius) return false;
+        }
+      }
+      return true;
+    };
+    if(tryMove(e.x+dx,e.y)) e.x+=dx;
+    if(tryMove(e.x,e.y+dy)) e.y+=dy;
+  }
+
+  /* --------------------------- IA del Jefe ----------------------------- */
+  _canBossSeePlayer(){
+    const b=this.boss, p=this.player, w=this.world;
+    const d=dist(b.x,b.y,p.x,p.y);
+    let range = b.state==="HUNT"?TILE*11:TILE*8;
+    if(p.sprinting) range*=1.25;       // correr hace ruido -> más detectable
+    if(p.hidden){ range*= p.moving?0.55:0.16; } // escondido reduce mucho el rango
+    if(d>range) return false;
+    // cono de visión (salvo muy cerca: "olfato")
+    if(d>TILE*2.2){
+      const ang=Math.atan2(p.y-b.y,p.x-b.x); let diff=Math.abs(((ang-b.dir+Math.PI*3)%(Math.PI*2))-Math.PI);
+      const fov = b.state==="HUNT"?2.4:1.7;
+      if(diff>fov/2) return false;
+    }
+    // línea de visión sin árboles
+    return w.lineClear(Math.floor(b.x/TILE),Math.floor(b.y/TILE),Math.floor(p.x/TILE),Math.floor(p.y/TILE));
+  }
+
+  _updateBoss(dt){
+    const b=this.boss, p=this.player, w=this.world;
+    b.speed = b.baseSpeed * (b.state==="HUNT"?1.18:1) + this.elapsed*0.25; // se vuelve más rápido con el tiempo
+    const sees=this._canBossSeePlayer();
+
+    if(sees){
+      if(b.state!=="HUNT"){ this.audio.stinger(); this.flash=0.6; this.shake=10;
+        document.getElementById("danger-label").style.opacity=1; this.toast("¡EL VERDUGO TE PERSIGUE!",1500); }
+      b.state="HUNT"; b.alert=1; b.lastSeen={x:p.x,y:p.y};
+      b.target={x:p.x,y:p.y};
+    } else if(b.state==="HUNT"){
+      // perdió de vista -> ir al último avistamiento y buscar
+      b.state="SEARCH"; b.searchT=5.5; b.target=b.lastSeen?{...b.lastSeen}:null;
+      document.getElementById("danger-label").style.opacity=0;
+    }
+
+    if(b.state==="SEARCH"){
+      b.searchT-=dt;
+      if(b.target && dist(b.x,b.y,b.target.x,b.target.y)<TILE*0.8){
+        // llegó al último punto: mira alrededor un momento, luego elige punto cercano
+        b.target={x:b.x+rand(-1,1)*TILE*5, y:b.y+rand(-1,1)*TILE*5};
+      }
+      if(b.searchT<=0){ b.state="PATROL"; b.target=null; }
+    }
+
+    if(b.state==="PATROL"){
+      if(!b.target || dist(b.x,b.y,b.target.x,b.target.y)<TILE*1.0){
+        b.target=this._randomWalkable();
+      }
+    }
+
+    // Pathfinding periódico hacia el objetivo
+    b.repath-=dt;
+    if(b.target && b.repath<=0){
+      b.repath = b.state==="HUNT"?0.28:0.7;
+      const path=w.astar(Math.floor(b.x/TILE),Math.floor(b.y/TILE),
+                         clamp(Math.floor(b.target.x/TILE),1,w.w-2), clamp(Math.floor(b.target.y/TILE),1,w.h-2));
+      if(path && path.length>1){ b.path=path; b.pathStep=1; } else { b.path=null; }
+    }
+
+    // Seguir la ruta
+    let mvx=0,mvy=0;
+    if(b.path && b.pathStep<b.path.length){
+      const node=b.path[b.pathStep]; const nx=(node.x+0.5)*TILE, ny=(node.y+0.5)*TILE;
+      const dx=nx-b.x, dy=ny-b.y, dd=Math.hypot(dx,dy);
+      if(dd<6){ b.pathStep++; } else { mvx=dx/dd; mvy=dy/dd; }
+    } else if(b.state==="HUNT"){ // sin ruta pero a la vista: directo
+      const dx=p.x-b.x,dy=p.y-b.y,dd=Math.hypot(dx,dy)||1; mvx=dx/dd; mvy=dy/dd;
+    }
+    if(mvx||mvy){ b.dir=lerpAngle(b.dir, Math.atan2(mvy,mvx), 0.2); }
+    this._moveEntity(b, mvx*b.speed*dt, mvy*b.speed*dt, 16);
+
+    // pasos del jefe (sonido sutil ligado a cercanía lo da el danger; aquí partículas)
+    b.footT-=dt;
+    if((mvx||mvy) && b.footT<=0){ b.footT=0.18; this._dust(b.x,b.y,"#3a2b2b"); }
+
+    // ¿alcanzó al jugador? -> martillazo
+    if(dist(b.x,b.y,p.x,p.y) < TILE*0.95 && p.alive){
+      b.hammerSwing=0.35; this._lose();
+    }
+  }
+
+  _randomWalkable(){
+    const w=this.world;
+    for(let i=0;i<40;i++){ const x=randi(1,w.w-1), y=randi(1,w.h-1); if(w.walkableCell(x,y)) return {x:(x+0.5)*TILE,y:(y+0.5)*TILE}; }
+    return {x:this.player.x,y:this.player.y};
+  }
+
+  /* --------------------------- Peligro/Audio --------------------------- */
+  _updateDanger(dt){
+    const b=this.boss, p=this.player;
+    const d=dist(b.x,b.y,p.x,p.y);
+    // proximidad: 0 lejos -> 1 encima (a partir de ~10 tiles)
+    let prox = clamp(1 - d/(TILE*10), 0, 1);
+    prox = Math.pow(prox, 1.4);
+    let target = prox*0.7;
+    if(b.state==="HUNT") target = Math.max(target, 0.85) + prox*0.15;
+    else if(b.state==="SEARCH") target = Math.max(target, 0.45);
+    if(p.hidden && b.state!=="HUNT") target*=0.6;
+    target=clamp(target,0,1);
+    // suaviza
+    this.danger = lerp(this.danger, target, 1-Math.pow(0.02, dt));
+    this.audio.setDanger(this.danger);
+
+    // HUD vignette según peligro
+    const vig=document.getElementById("vignette");
+    const pulse = this.danger>0.5 ? Math.sin(this.t*lerp(4,12,this.danger))*this.danger*30 : 0;
+    vig.style.boxShadow=`inset 0 0 ${lerp(200,120,this.danger)}px ${40+pulse}px rgba(${Math.floor(lerp(0,90,this.danger))},0,0,${lerp(.85,.96,this.danger)})`;
+    document.getElementById("danger-label").style.opacity = b.state==="HUNT"?1:0;
+  }
+
+  /* ---------------------------- Partículas ----------------------------- */
+  _burst(x,y,color,n){ for(let i=0;i<n;i++){ const a=rand(0,Math.PI*2),s=rand(40,180);
+    this.particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:rand(0.4,0.9),max:0.9,color,r:rand(2,4)}); } }
+  _dust(x,y,color="#6b7b4a"){ this.particles.push({x:x+rand(-6,6),y:y+rand(-2,8),vx:rand(-10,10),vy:rand(-20,-5),life:0.5,max:0.5,color,r:rand(1.5,3)}); }
+  _updateParticles(dt){ for(let i=this.particles.length-1;i>=0;i--){ const p=this.particles[i];
+    p.x+=p.vx*dt; p.y+=p.vy*dt; p.vx*=0.92; p.vy=p.vy*0.92+30*dt; p.life-=dt; if(p.life<=0) this.particles.splice(i,1); } }
+
+  /* ------------------------------ Fin --------------------------------- */
+  _win(){ this.state="end"; this.player.alive=true; this.audio.victory(); this.audio.setDanger(0);
+    this._showEnd(true); }
+  _lose(){ if(this.state!=="play") return; this.state="end"; this.player.alive=false; this.shake=24; this.flash=1;
+    this.audio.hammer(); this.audio.setDanger(0.2); this._burst(this.player.x,this.player.y,"#b91c1c",30);
+    setTimeout(()=>this._showEnd(false), 900); }
+  _showEnd(win){
+    const sc=document.getElementById("endScreen"); sc.classList.remove("hidden");
+    const ti=document.getElementById("endTitle");
+    ti.className="endTitle "+(win?"win":"lose");
+    ti.innerHTML = win?"HAS ESCAPADO":"TE ATRAPÓ";
+    document.getElementById("endStats").innerHTML =
+      `Tiempo: <b>${this.elapsed.toFixed(1)}s</b> · Llaves: <b>${this.player.keys}/3</b>`;
+    document.getElementById("endText").textContent = win
+      ? "Cruzaste el portón con las tres llaves. El bosque queda atrás... por ahora."
+      : "El martillo del Verdugo cayó sobre ti. El bosque reclama otra víctima.";
+  }
+
+  /* ------------------------------ HUD --------------------------------- */
+  _syncKeyHUD(){
+    document.querySelectorAll(".keychip").forEach((el,i)=>{
+      el.classList.toggle("has", this.world.keys[i] && this.world.keys[i].taken);
+    });
+    const st=document.getElementById("stamina");
+    // (la barra se actualiza en render para fluidez)
+  }
+  toast(msg,ms=2000){ const el=document.getElementById("toast"); el.textContent=msg; el.classList.add("show");
+    clearTimeout(this._toastT); this._toastT=setTimeout(()=>el.classList.remove("show"), ms); }
+
+  /* ----------------------------- Render -------------------------------- */
+  _render(dt){
+    const ctx=this.ctx, W=this.cv.width, H=this.cv.height;
+    ctx.save();
+    if(this.shake>0.3){ ctx.translate(rand(-1,1)*this.shake, rand(-1,1)*this.shake); }
+
+    if(this.state==="menu"){ this._renderMenuBg(ctx,W,H); ctx.restore(); return; }
+
+    // cámara centrada en el jugador
+    const camx=clamp(this.player.x - W/2, 0, this.world.w*TILE - W);
+    const camy=clamp(this.player.y - H/2, 0, this.world.h*TILE - H);
+    ctx.translate(-camx,-camy);
+
+    this._renderWorld(ctx,camx,camy,W,H);
+    this._renderItems(ctx);
+    this._renderParticles(ctx);
+    this._renderBoss(ctx);
+    this._renderPlayer(ctx);
+    this._renderFog(ctx,camx,camy,W,H);
+
+    ctx.restore();
+
+    // flash rojo (susto/muerte)
+    if(this.flash>0.02){ ctx.fillStyle=`rgba(180,0,0,${this.flash*0.5})`; ctx.fillRect(0,0,W,H); }
+
+    // barra resistencia + minimapa
+    this._renderHUD();
+  }
+
+  _renderWorld(ctx,camx,camy,W,H){
+    const w=this.world;
+    const x0=Math.max(0,Math.floor(camx/TILE)), x1=Math.min(w.w-1,Math.floor((camx+W)/TILE));
+    const y0=Math.max(0,Math.floor(camy/TILE)), y1=Math.min(w.h-1,Math.floor((camy+H)/TILE));
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+      const t=w.grid[w.idx(x,y)]; const px=x*TILE, py=y*TILE; const dseed=w.decor[w.idx(x,y)];
+      // suelo (verde con variación)
+      const g=lerp(46,70,dseed), tone=`rgb(${Math.floor(g*0.45)},${Math.floor(g)},${Math.floor(g*0.5)})`;
+      ctx.fillStyle=tone; ctx.fillRect(px,py,TILE,TILE);
+      if(t===T_PATH){ ctx.fillStyle="#5b4a32"; ctx.fillRect(px+4,py+4,TILE-8,TILE-8); }
+      if(t===T_BUSH){ this._drawBush(ctx,px,py,dseed); }
+      if(t===T_TREE){ this._drawTree(ctx,px,py,dseed); }
+      if(t===T_EXIT){ this._drawExit(ctx,px,py); }
+    }
+  }
+  _drawTree(ctx,px,py,seed){
+    // sombra
+    ctx.fillStyle="rgba(0,0,0,.35)"; ctx.beginPath(); ctx.ellipse(px+TILE/2, py+TILE-6, TILE*0.4, TILE*0.18, 0,0,7); ctx.fill();
+    // tronco
+    ctx.fillStyle="#5b3a22"; ctx.fillRect(px+TILE/2-4, py+TILE/2, 8, TILE/2-4);
+    // copa (3 círculos verdes)
+    const cols=["#1f5c2e","#247a37","#2e8b43"];
+    for(let i=0;i<3;i++){ ctx.fillStyle=cols[i];
+      ctx.beginPath(); ctx.arc(px+TILE/2+Math.cos(i*2.1+seed*6)*8, py+TILE*0.4+Math.sin(i*2.1+seed*6)*8 - i*2, TILE*0.34-i*3,0,7); ctx.fill(); }
+    ctx.fillStyle="rgba(120,220,140,.25)"; ctx.beginPath(); ctx.arc(px+TILE*0.4,py+TILE*0.3,5,0,7); ctx.fill();
+  }
+  _drawBush(ctx,px,py,seed){
+    ctx.fillStyle="rgba(0,0,0,.25)"; ctx.beginPath(); ctx.ellipse(px+TILE/2,py+TILE-8,TILE*0.32,TILE*0.14,0,0,7); ctx.fill();
+    const cols=["#2f6b35","#3c8a44"];
+    for(let i=0;i<4;i++){ ctx.fillStyle=cols[i%2];
+      ctx.beginPath(); ctx.arc(px+TILE*0.3+ (i%2)*TILE*0.4, py+TILE*0.55+Math.floor(i/2)*TILE*0.22, TILE*0.22,0,7); ctx.fill(); }
+    // moras decorativas
+    ctx.fillStyle="#caa6e6"; for(let i=0;i<3;i++){ ctx.beginPath(); ctx.arc(px+TILE*0.3+seed*20+i*7, py+TILE*0.5+ (i%2)*6, 2,0,7); ctx.fill(); }
+  }
+  _drawExit(ctx,px,py){
+    const open=this.exitOpen; const t=this.t;
+    // marco de piedra
+    ctx.fillStyle="#3b3340"; ctx.fillRect(px-2,py-6,TILE+4,TILE+10);
+    ctx.fillStyle= open? "#1a2a16":"#241018"; ctx.fillRect(px+4,py+2,TILE-8,TILE-2);
+    if(open){ // portal brillante de escape
+      const glow=ctx.createRadialGradient(px+TILE/2,py+TILE/2,2,px+TILE/2,py+TILE/2,TILE*0.7);
+      glow.addColorStop(0,`rgba(120,255,170,${0.6+Math.sin(t*4)*0.2})`); glow.addColorStop(1,"rgba(120,255,170,0)");
+      ctx.fillStyle=glow; ctx.fillRect(px-10,py-10,TILE+20,TILE+20);
+      ctx.fillStyle="#bfffd6"; ctx.font="bold 11px sans-serif"; ctx.textAlign="center"; ctx.fillText("SALIDA",px+TILE/2,py-10);
+    } else {
+      // barrotes + candado
+      ctx.strokeStyle="#6b5563"; ctx.lineWidth=3;
+      for(let i=1;i<4;i++){ ctx.beginPath(); ctx.moveTo(px+i*TILE/4,py+4); ctx.lineTo(px+i*TILE/4,py+TILE-2); ctx.stroke(); }
+      ctx.fillStyle="#d4af37"; ctx.beginPath(); ctx.arc(px+TILE/2,py+TILE/2,6,0,7); ctx.fill();
+      ctx.fillStyle="#7a5c12"; ctx.fillRect(px+TILE/2-2,py+TILE/2,4,5);
+    }
+  }
+  _drawExit_glowReset(){}
+
+  _renderItems(ctx){
+    const t=this.t;
+    for(const k of this.world.keys){ if(k.taken) continue;
+      const kx=(k.x+0.5)*TILE, ky=(k.y+0.5)*TILE + Math.sin(t*3+k.x)*3;
+      const glow=ctx.createRadialGradient(kx,ky,1,kx,ky,26);
+      glow.addColorStop(0,"rgba(245,196,81,.55)"); glow.addColorStop(1,"rgba(245,196,81,0)");
+      ctx.fillStyle=glow; ctx.beginPath(); ctx.arc(kx,ky,26,0,7); ctx.fill();
+      // llave estilizada
+      ctx.save(); ctx.translate(kx,ky); ctx.rotate(Math.sin(t*2)*0.2);
+      ctx.fillStyle="#f5c451"; ctx.strokeStyle="#b8860b"; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(-6,0,5,0,7); ctx.fill(); ctx.stroke();
+      ctx.fillRect(-1,-2,12,4); ctx.fillRect(8,-2,3,7); ctx.fillRect(4,-2,3,5);
+      ctx.restore();
+    }
+  }
+
+  _renderPlayer(ctx){
+    const p=this.player; const t=this.t;
+    ctx.save(); ctx.translate(p.x,p.y);
+    // sombra
+    ctx.fillStyle="rgba(0,0,0,.4)"; ctx.beginPath(); ctx.ellipse(0,14,12,5,0,0,7); ctx.fill();
+    // linterna (cono) apuntando a dir
+    ctx.save(); ctx.rotate(p.dir);
+    const cone=ctx.createRadialGradient(0,0,4,90,0,90);
+    cone.addColorStop(0,"rgba(255,245,200,.22)"); cone.addColorStop(1,"rgba(255,245,200,0)");
+    ctx.fillStyle=cone; ctx.beginPath(); ctx.moveTo(0,0); ctx.arc(0,0,96,-0.5,0.5); ctx.closePath(); ctx.fill();
+    ctx.restore();
+
+    const bob=p.moving?Math.sin(t*12)*1.5:0;
+    const alpha=p.hidden? (p.moving?0.65:0.4) : 1;
+    ctx.globalAlpha=alpha;
+    // cuerpo (chaqueta azul)
+    ctx.fillStyle="#3a6ea5"; ctx.beginPath(); ctx.arc(0,bob,11,0,7); ctx.fill();
+    // cabeza
+    ctx.fillStyle="#e8c39e"; ctx.beginPath(); ctx.arc(Math.cos(p.dir)*4,bob-6+Math.sin(p.dir)*2,6,0,7); ctx.fill();
+    // mochila
+    ctx.fillStyle="#5b8f3a"; ctx.beginPath(); ctx.arc(-Math.cos(p.dir)*6,bob-Math.sin(p.dir)*4,5,0,7); ctx.fill();
+    ctx.globalAlpha=1;
+    if(p.hidden){ ctx.fillStyle="rgba(120,220,140,.9)"; ctx.font="9px sans-serif"; ctx.textAlign="center"; ctx.fillText("oculto",0,-20); }
+    ctx.restore();
+  }
+
+  _renderBoss(ctx){
+    const b=this.boss; const t=this.t;
+    // sólo dibuja si la celda está explorada/visible (si no, el jugador no debería verlo)
+    ctx.save(); ctx.translate(b.x,b.y);
+    // sombra grande
+    ctx.fillStyle="rgba(0,0,0,.5)"; ctx.beginPath(); ctx.ellipse(0,20,20,8,0,0,7); ctx.fill();
+    // aura roja si caza
+    if(b.state!=="PATROL"){ const a=b.state==="HUNT"?0.5:0.25;
+      const glow=ctx.createRadialGradient(0,0,4,0,0,40); glow.addColorStop(0,`rgba(226,30,30,${a})`); glow.addColorStop(1,"rgba(226,30,30,0)");
+      ctx.fillStyle=glow; ctx.beginPath(); ctx.arc(0,0,40,0,7); ctx.fill(); }
+    const sway=Math.sin(t*6)*2;
+    ctx.save(); ctx.rotate(b.dir);
+    // martillo gigante (mango + cabeza)
+    ctx.strokeStyle="#5a3a1e"; ctx.lineWidth=6; ctx.beginPath(); ctx.moveTo(6,6); ctx.lineTo(34,-8); ctx.stroke();
+    ctx.fillStyle="#9aa1a8"; ctx.fillRect(28,-22,16,28);
+    ctx.fillStyle="#c2cad1"; ctx.fillRect(28,-22,16,6);
+    ctx.restore();
+    // cuerpo (mole oscura)
+    ctx.fillStyle="#2b2326"; ctx.beginPath(); ctx.arc(0,sway,18,0,7); ctx.fill();
+    ctx.fillStyle="#1c161a"; ctx.beginPath(); ctx.arc(0,sway-2,18,Math.PI,0); ctx.fill();
+    // máscara de hockey (estilo Jason)
+    ctx.save(); ctx.translate(Math.cos(b.dir)*6, sway-8+Math.sin(b.dir)*3);
+    ctx.fillStyle="#e8e4d8"; ctx.beginPath(); ctx.ellipse(0,0,9,11,0,0,7); ctx.fill();
+    ctx.fillStyle="#1a1a1a"; // agujeros
+    ctx.beginPath(); ctx.arc(-3,-2,1.6,0,7); ctx.arc(3,-2,1.6,0,7); ctx.arc(0,3,1.4,0,7); ctx.fill();
+    ctx.beginPath(); ctx.arc(-3,2,1,0,7); ctx.arc(3,2,1,0,7); ctx.fill();
+    ctx.restore();
+    ctx.restore();
+  }
+
+  _renderParticles(ctx){
+    for(const p of this.particles){ ctx.globalAlpha=clamp(p.life/p.max,0,1);
+      ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill(); }
+    ctx.globalAlpha=1;
+  }
+
+  // Niebla de guerra: oscurece lo no explorado y atenúa lo explorado-fuera-de-vista
+  _renderFog(ctx,camx,camy,W,H){
+    const w=this.world; const p=this.player;
+    const x0=Math.max(0,Math.floor(camx/TILE)), x1=Math.min(w.w-1,Math.floor((camx+W)/TILE));
+    const y0=Math.max(0,Math.floor(camy/TILE)), y1=Math.min(w.h-1,Math.floor((camy+H)/TILE));
+    const pcx=p.x, pcy=p.y; const vis=TILE*(this.player.sprinting?3.4:4.4);
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+      const px=x*TILE, py=y*TILE; const cxp=px+TILE/2, cyp=py+TILE/2;
+      if(!w.explored[w.idx(x,y)]){ ctx.fillStyle="rgba(3,5,7,1)"; ctx.fillRect(px,py,TILE+1,TILE+1); continue; }
+      // explorado: ¿dentro del radio de visión actual?
+      const d=dist(cxp,cyp,pcx,pcy);
+      let dark;
+      if(d<vis) dark=clamp((d-vis*0.55)/(vis*0.45),0,1)*0.55; // gradiente suave hasta el borde de la vista
+      else dark=0.78; // recordado pero a oscuras
+      if(dark>0.01){ ctx.fillStyle=`rgba(3,6,9,${dark})`; ctx.fillRect(px,py,TILE+1,TILE+1); }
+    }
+  }
+
+  _renderHUD(){
+    // barra de resistencia
+    const st=document.getElementById("stamina");
+    st.style.width=(this.player.stamina*100)+"%";
+    st.classList.toggle("tired", this.player.stamina<0.3);
+    // minimapa
+    this._renderMinimap();
+  }
+  _renderMinimap(){
+    const m=this.mctx, w=this.world, S=this.mini.width/w.w;
+    m.clearRect(0,0,this.mini.width,this.mini.height);
+    m.fillStyle="#070b0d"; m.fillRect(0,0,this.mini.width,this.mini.height);
+    for(let y=0;y<w.h;y++)for(let x=0;x<w.w;x++){
+      if(!w.explored[w.idx(x,y)]) continue;
+      const t=w.grid[w.idx(x,y)];
+      m.fillStyle = t===T_TREE?"#1c3a22": t===T_BUSH?"#2f6b35": t===T_EXIT?"#7bf0c2":"#2a3a28";
+      m.fillRect(x*S,y*S,S+0.5,S+0.5);
+    }
+    // llaves descubiertas
+    for(const k of w.keys){ if(k.taken) continue; if(!w.explored[w.idx(k.x,k.y)]) continue;
+      m.fillStyle="#f5c451"; m.fillRect(k.x*S-1,k.y*S-1,S+2,S+2); }
+    // salida si explorada
+    if(w.explored[w.idx(w.exit.x,w.exit.y)]){ m.fillStyle=this.exitOpen?"#7bf0c2":"#e23b3b";
+      m.fillRect(w.exit.x*S-1,w.exit.y*S-1,S+2,S+2); }
+    // jugador
+    m.fillStyle="#9fd0ff"; const px=(this.player.x/TILE)*S, py=(this.player.y/TILE)*S;
+    m.beginPath(); m.arc(px,py,2.5,0,7); m.fill();
+    // jefe sólo si está muy cerca (sensación de radar/peligro)
+    if(this.danger>0.6){ m.fillStyle="#e23b3b"; const bx=(this.boss.x/TILE)*S, by=(this.boss.y/TILE)*S;
+      m.beginPath(); m.arc(bx,by,2.5,0,7); m.fill(); }
+  }
+
+  _renderMenuBg(ctx,W,H){
+    ctx.fillStyle="#0a1410"; ctx.fillRect(0,0,W,H);
+    // árboles de fondo animados
+    for(let i=0;i<40;i++){ const x=(i*123.4 % W), y=(i*71.7 % H);
+      this._drawTree(ctx, x, y, (i%7)/7); }
+    ctx.fillStyle="rgba(3,5,7,.6)"; ctx.fillRect(0,0,W,H);
+  }
+}
+
+function lerpAngle(a,b,t){ let d=((b-a+Math.PI*3)%(Math.PI*2))-Math.PI; return a+d*t; }
+
+/* Arranque */
+window.addEventListener("load",()=>{ window.GAME=new Game(); });
+</script>
+</body>
+</html>
