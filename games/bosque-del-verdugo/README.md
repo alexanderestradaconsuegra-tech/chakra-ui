@@ -47,9 +47,17 @@ También funciona en **móvil/táctil** (joystick virtual + botón USAR).
     el terror.
   - Ambiente de viento que baja cuando sube la tensión.
   - *Stingers* al ser descubierto y golpe de martillo al morir.
-- **Niebla de guerra** con tres niveles: inexplorado (negro), recordado (oscuro) y
-  visible (gradiente suave alrededor del jugador).
-- Extras: minimapa-radar (el jefe solo aparece si está muy cerca), linterna en cono,
-  partículas, *screen shake*, viñeta pulsante y barra de resistencia.
+- **Sprites pixel-art horneados por código**: cada sprite (jugador, Verdugo, árboles,
+  arbustos, llave, tiles de hierba/camino) se dibuja a baja resolución con una paleta
+  limitada, se le añade un **contorno automático** de 1px y se escala con
+  *nearest-neighbor* (`imageSmoothingEnabled=false`) → estética retro nítida sin
+  archivos externos. Personajes **animados por dirección** (abajo/arriba/lado, con
+  *flip* horizontal) y **ciclo de caminado** de 2 frames.
+- **Iluminación suave** (en vez de niebla cuadriculada): un *mapa de brillo* combina
+  oscuridad total, terreno recordado en gris tenue y un halo cálido degradado
+  (linterna) que se multiplica sobre la escena. Luces guía sobre llaves/portón.
+- **Cámara con zoom** y seguimiento suavizado; movimiento con aceleración/frenado.
+- Extras: minimapa-radar (el jefe solo aparece si está muy cerca), partículas,
+  *screen shake*, viñeta pulsante y barra de resistencia.
 
 Todo en `index.html` (~700 líneas, comentado en español).
