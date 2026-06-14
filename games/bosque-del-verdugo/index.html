@@ -251,6 +251,12 @@ class AudioEngine {
     const s=ctx.createBufferSource(); s.buffer=b; const f=ctx.createBiquadFilter(); f.type="lowpass"; f.frequency.value=cut;
     const g=ctx.createGain(); g.gain.value=0.4; s.connect(f); f.connect(g); g.connect(this.master); s.start(t);
   }
+  trap(){ // chasquido metálico del cepo
+    if(!this.ready||this.muted) return; const ctx=this.ctx, t=ctx.currentTime;
+    this._noiseHit(0.12,4200);
+    this._tone(1500,t,0,0.07,"square",0.3); this._tone(950,t+0.04,0,0.09,"square",0.22);
+    this._tone(210,t+0.02,0,0.2,"sawtooth",0.3);
+  }
   stinger(){ // "¡te vio!" — barrido ascendente + golpe
     if(!this.ready||this.muted) return; const ctx=this.ctx, t=ctx.currentTime;
     const o=ctx.createOscillator(); o.type="sawtooth"; o.frequency.setValueAtTime(180,t); o.frequency.exponentialRampToValueAtTime(1400,t+0.5);
@@ -274,7 +280,7 @@ class AudioEngine {
 
 /* ============================== MUNDO ================================== */
 const TILE=48, MAPW=64, MAPH=64;
-const ZOOM=1.35; // acercamiento de cámara: personajes más grandes y legibles
+const ZOOM=1.62; // acercamiento de cámara: personajes más grandes y legibles
 const T_GRASS=0, T_TREE=1, T_BUSH=2, T_PATH=3, T_EXIT=4;
 
 class World {
@@ -346,6 +352,19 @@ class World {
 
     // Garantiza conectividad: BFS desde spawn; si algo es inalcanzable, abre túnel
     this._ensureReachable(this.spawn, this.keys.map(k=>({x:k.x,y:k.y})).concat([{x:ix,y:iy}]));
+
+    // Trampas (cepos): sobre hierba caminable, lejos del spawn y de las llaves
+    this.traps=[];
+    const farFrom=(x,y,list,minTiles)=>list.every(o=>dist2(x,y,o.x,o.y)>minTiles*minTiles);
+    let attempts=0;
+    while(this.traps.length<14 && attempts++<600){
+      const x=randi(3,this.w-3), y=randi(3,this.h-3);
+      if(this.grid[this.idx(x,y)]!==T_GRASS) continue;
+      if(!farFrom(x,y,[this.spawn],7)) continue;
+      if(!farFrom(x,y,this.keys,3)) continue;
+      if(!farFrom(x,y,this.traps,4)) continue;
+      this.traps.push({x,y,armed:true});
+    }
 
     // Punto de patrulla inicial del jefe: lejos del jugador
     this.bossSpawn={x:clamp(this.w-this.spawn.x,2,this.w-3), y:clamp(this.spawn.y+8,2,this.h-3)};
@@ -439,19 +458,20 @@ class Game {
   start(){
     this.world=new World();
     const sp=this.world.spawn;
-    this.player={ x:(sp.x+0.5)*TILE, y:(sp.y+0.5)*TILE, vx:0, vy:0, dir:0, speed:215, stamina:1, sprinting:false, hidden:false, moving:false, keys:0, alive:true };
+    this.player={ x:(sp.x+0.5)*TILE, y:(sp.y+0.5)*TILE, vx:0, vy:0, dir:0, speed:215, stamina:1, sprinting:false, hidden:false, moving:false, keys:0, alive:true, stunT:0 };
     this.cam=null;
     const bs=this.world.bossSpawn;
-    this.boss={ x:(bs.x+0.5)*TILE, y:(bs.y+0.5)*TILE, dir:0, baseSpeed:96, speed:96, state:"PATROL",
-                target:null, path:null, pathStep:0, repath:0, lastSeen:null, alert:0, lunge:0, hammerSwing:0, footT:0 };
+    this.boss={ x:(bs.x+0.5)*TILE, y:(bs.y+0.5)*TILE, dir:0, baseSpeed:80, speed:80, state:"PATROL",
+                target:null, path:null, pathStep:0, repath:0, lastSeen:null, alert:0, lunge:0, hammerSwing:0, footT:0, stunT:0 };
     this.keysLeft=this.world.keys.length;
     this.exitOpen=false; this.elapsed=0; this.danger=0; this.shake=0; this.flash=0;
+    this.graceT=7; this._graceWarned=false; // el Verdugo "despierta" tras unos segundos
     this.particles=[];
     this.state="play";
     this.audio.init(); this.audio.resume();
     document.getElementById("startScreen").classList.add("hidden");
     document.getElementById("endScreen").classList.add("hidden");
-    this.toast("Encuentra las 3 llaves...", 2600);
+    this.toast("Busca las 3 llaves... y cuidado con los cepos.", 3000);
     this._syncKeyHUD();
   }
 
@@ -528,12 +548,22 @@ class Game {
     this._updateBoss(dt);
     this._updateDanger(dt);
     this._updateParticles(dt);
+    if(this.danger<0.55 && Math.random()<dt*4) this._spawnFirefly(); // luciérnagas en calma
     this.shake*=Math.pow(0.0008,dt); this.flash*=Math.pow(0.02,dt);
   }
 
   _updatePlayer(dt){
     const p=this.player, w=this.world;
-    const ix=this.input.x, iy=this.input.y; const mv=Math.hypot(ix,iy);
+    let ix=this.input.x, iy=this.input.y; let mv=Math.hypot(ix,iy);
+    // atrapado en un cepo: forcejea (pulsa direcciones) para soltarte antes
+    if(p.stunT>0){
+      p.stunT-=dt*(mv>0.05?2.4:1); p.vx*=0.5; p.vy*=0.5;
+      p.moving=false; p.stamina=clamp(p.stamina+dt*0.1,0,1);
+      const cx0=Math.floor(p.x/TILE), cy0=Math.floor(p.y/TILE);
+      p.hidden = w.get(cx0,cy0)===T_BUSH; this._reveal(cx0,cy0,6);
+      if(p.moving===false && Math.random()<dt*6) this._dust(p.x,p.y,"#c2cad1");
+      return;
+    }
     p.moving = mv>0.05;
     // resistencia
     if(p.sprinting && p.moving){ p.stamina=clamp(p.stamina-dt*0.42,0,1); if(p.stamina<=0) p.sprinting=false; }
@@ -544,6 +574,7 @@ class Game {
     p.vx=lerp(p.vx,tvx,a); p.vy=lerp(p.vy,tvy,a);
     if(mv>0.05) p.dir=lerpAngle(p.dir, Math.atan2(iy,ix), 1-Math.exp(-20*dt));
     this._moveEntity(p, p.vx*dt, p.vy*dt, 12);
+    this._checkTraps(p, "player");
 
     // ¿escondido? (sobre arbusto). Quieto = invisible; moverse = parcialmente visible
     const cx=Math.floor(p.x/TILE), cy=Math.floor(p.y/TILE);
@@ -604,8 +635,17 @@ class Game {
 
   _updateBoss(dt){
     const b=this.boss, p=this.player, w=this.world;
-    b.speed = b.baseSpeed * (b.state==="HUNT"?1.18:1) + this.elapsed*0.25; // se vuelve más rápido con el tiempo
-    const sees=this._canBossSeePlayer();
+    // se vuelve más rápido con el tiempo, pero con tope (arranque más amable)
+    b.speed = (b.baseSpeed + Math.min(this.elapsed*0.16, 42)) * (b.state==="HUNT"?1.14:1);
+
+    // periodo de gracia: al empezar deambula lento y NO caza
+    this.graceT=Math.max(0,this.graceT-dt);
+    const grace=this.graceT>0;
+    if(grace){ b.speed*=0.55; }
+    else if(!this._graceWarned){ this._graceWarned=true; this.audio.stinger(); this.flash=0.45; this.shake=8;
+      this.toast("El Verdugo ha despertado...",2600); }
+
+    const sees = !grace && b.stunT<=0 && this._canBossSeePlayer();
 
     if(sees){
       if(b.state!=="HUNT"){ this.audio.stinger(); this.flash=0.6; this.shake=10;
@@ -651,16 +691,35 @@ class Game {
     } else if(b.state==="HUNT"){ // sin ruta pero a la vista: directo
       const dx=p.x-b.x,dy=p.y-b.y,dd=Math.hypot(dx,dy)||1; mvx=dx/dd; mvy=dy/dd;
     }
+    // parálisis por cepo: el jefe queda atrapado un momento (puedes usarlo a tu favor)
+    if(b.stunT>0){ b.stunT-=dt; mvx=0; mvy=0; }
+
     if(mvx||mvy){ b.dir=lerpAngle(b.dir, Math.atan2(mvy,mvx), 0.2); }
     this._moveEntity(b, mvx*b.speed*dt, mvy*b.speed*dt, 16);
+
+    // cepos: si el Verdugo pisa uno armado, se queda atrapado
+    this._checkTraps(b, "boss");
 
     // pasos del jefe (sonido sutil ligado a cercanía lo da el danger; aquí partículas)
     b.footT-=dt;
     if((mvx||mvy) && b.footT<=0){ b.footT=0.18; this._dust(b.x,b.y,"#3a2b2b"); }
 
     // ¿alcanzó al jugador? -> martillazo
-    if(dist(b.x,b.y,p.x,p.y) < TILE*0.95 && p.alive){
+    if(b.stunT<=0 && dist(b.x,b.y,p.x,p.y) < TILE*0.95 && p.alive){
       b.hammerSwing=0.35; this._lose();
+    }
+  }
+
+  // Comprueba si una entidad pisa un cepo armado -> lo dispara y la inmoviliza
+  _checkTraps(e,who){
+    for(const tr of this.world.traps){ if(!tr.armed) continue;
+      const tx=(tr.x+0.5)*TILE, ty=(tr.y+0.5)*TILE;
+      if(dist2(e.x,e.y,tx,ty) < (TILE*0.42)*(TILE*0.42)){
+        tr.armed=false; e.stunT = who==="boss"?2.6:1.5;
+        this.audio.trap(); this.shake=Math.max(this.shake,12); this._burst(tx,ty,"#c2cad1",16);
+        if(who==="player"){ this.flash=Math.max(this.flash,0.5); this.toast("¡CEPO! Atrapado — muévete para soltarte.",1800); }
+        else { this.toast("¡El Verdugo cayó en un cepo!",1800); }
+      }
     }
   }
 
@@ -697,7 +756,12 @@ class Game {
   _burst(x,y,color,n){ for(let i=0;i<n;i++){ const a=rand(0,Math.PI*2),s=rand(40,180);
     this.particles.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,life:rand(0.4,0.9),max:0.9,color,r:rand(2,4)}); } }
   _dust(x,y,color="#6b7b4a"){ this.particles.push({x:x+rand(-6,6),y:y+rand(-2,8),vx:rand(-10,10),vy:rand(-20,-5),life:0.5,max:0.5,color,r:rand(1.5,3)}); }
+  _spawnFirefly(){ const a=rand(0,7), r=rand(70,290);
+    this.particles.push({x:this.player.x+Math.cos(a)*r, y:this.player.y+Math.sin(a)*r,
+      vx:rand(-10,10), vy:rand(-10,10), life:rand(2,4), max:4, color:"#cde86a", r:rand(1.2,2.2), glow:true}); }
   _updateParticles(dt){ for(let i=this.particles.length-1;i>=0;i--){ const p=this.particles[i];
+    if(p.glow){ p.vx=(p.vx+rand(-18,18)*dt)*0.96; p.vy=(p.vy+rand(-18,18)*dt)*0.96;
+      p.x+=p.vx*dt; p.y+=p.vy*dt; p.life-=dt; if(p.life<=0) this.particles.splice(i,1); continue; }
     p.x+=p.vx*dt; p.y+=p.vy*dt; p.vx*=0.92; p.vy=p.vy*0.92+30*dt; p.life-=dt; if(p.life<=0) this.particles.splice(i,1); } }
 
   /* ------------------------------ Fin --------------------------------- */
@@ -839,6 +903,28 @@ class Game {
     S.path=this._make(16,16,(p)=>{ p(0,0,16,16,"#5b4a32");
       [[3,4],[8,7],[11,3],[5,12],[13,10],[7,9]].forEach(([x,y],i)=>p(x,y,2,1,i%2?"#6d5a3e":"#4a3c28")); },false);
 
+    // ---------- Cepos (16x16) : armado / disparado -----------
+    const MET="#8b939b", METD="#566069", METL="#b9c0c7", TEE="#d4dade", BASEm="#33383e";
+    S.trapArmed=this._make(16,16,(p)=>{
+      p(3,7,10,4,BASEm); p(3,7,10,1,METD);
+      p(2,6,4,2,MET); p(2,4,1,2,TEE); p(3,3,1,2,TEE); p(4,3,1,2,TEE); p(5,4,1,2,TEE);     // mandíbula izq
+      p(10,6,4,2,MET); p(13,4,1,2,TEE); p(12,3,1,2,TEE); p(11,3,1,2,TEE); p(10,4,1,2,TEE); // mandíbula der
+      p(6,8,4,3,METL); p(4,10,2,2,METD); p(10,10,2,2,METD); p(7,11,2,3,METD);              // placa + muelles
+    });
+    S.trapSprung=this._make(16,16,(p)=>{
+      p(3,8,10,4,BASEm); p(3,8,10,1,METD);
+      p(4,6,8,4,MET); p(5,6,6,1,TEE); p(5,9,6,1,TEE); p(7,6,1,4,METD); p(6,12,4,2,METD);
+    });
+
+    // ---------- Decoración de suelo (flor, seta, roca, helecho) -----------
+    const flower=this._make(8,8,(p)=>{ p(3,4,1,3,"#2f7a3a");
+      p(3,1,2,2,"#e84d6a"); p(2,2,1,1,"#ffd34d"); p(4,2,1,1,"#ffd34d"); p(3,2,1,1,"#fff2b0"); });
+    const mushroom=this._make(8,8,(p)=>{ p(3,4,2,3,"#e9e0c8");
+      p(1,2,6,3,"#c8362f"); p(2,1,4,1,"#c8362f"); p(2,3,1,1,"#fff"); p(4,2,1,1,"#fff"); p(5,4,1,1,"#fff"); });
+    const rock=this._make(10,7,(p)=>{ p(1,3,8,3,"#7b828a"); p(2,2,6,2,"#9aa1a8"); p(2,5,8,1,"#5b636b"); p(3,3,2,1,"#b9c0c7"); });
+    const fern=this._make(8,8,(p)=>{ p(3,2,1,5,"#2f7a3a"); p(1,3,2,1,"#3c8a44"); p(5,3,2,1,"#3c8a44"); p(1,5,2,1,"#2f6b35"); p(5,5,2,1,"#2f6b35"); });
+    S.decal=[flower,mushroom,rock,fern];
+
     this.spr=S;
   }
 
@@ -861,6 +947,7 @@ class Game {
     ctx.translate(-camx,-camy);
 
     this._renderWorld(ctx,camx,camy,VW,VH);
+    this._renderTraps(ctx);
     this._renderItems(ctx);
     this._renderParticles(ctx);
     this._renderBoss(ctx);
@@ -886,6 +973,11 @@ class Game {
       // suelo de hierba (tile pixel-art)
       ctx.drawImage(this.spr.grass[(x+y)&1], px,py,TILE,TILE);
       if(t===T_PATH){ ctx.drawImage(this.spr.path, px,py,TILE,TILE); }
+      else if(t===T_GRASS){ // decoración dispersa y determinista (no parpadea)
+        let d=-1; const ds=dseed;
+        if(ds>0.965) d=0; else if(ds>0.93&&ds<0.945) d=1; else if(ds>0.90&&ds<0.912) d=2; else if(ds>0.86&&ds<0.875) d=3;
+        if(d>=0){ const img=this.spr.decal[d], s=TILE*0.44; ctx.drawImage(img, px+TILE/2-s/2, py+TILE/2-s/2+5, s, s); }
+      }
       if(t===T_BUSH){ this._drawBush(ctx,px,py,dseed); }
       if(t===T_TREE){ this._drawTree(ctx,px,py,dseed); }
       if(t===T_EXIT){ this._drawExit(ctx,px,py); }
@@ -921,6 +1013,20 @@ class Game {
   }
   _drawExit_glowReset(){}
 
+  _renderTraps(ctx){
+    const t=this.t, p=this.player;
+    for(const tr of this.world.traps){
+      const x=(tr.x+0.5)*TILE, y=(tr.y+0.5)*TILE;
+      if(tr.armed){ // destello de advertencia sutil cuando estás muy cerca (justo)
+        const d=dist(x,y,p.x,p.y);
+        if(d<TILE*2.1){ const a=(1-d/(TILE*2.1))*0.5*(0.55+0.45*Math.sin(t*9));
+          const gl=ctx.createRadialGradient(x,y,1,x,y,16); gl.addColorStop(0,`rgba(230,70,70,${a})`); gl.addColorStop(1,"rgba(230,70,70,0)");
+          ctx.fillStyle=gl; ctx.beginPath(); ctx.arc(x,y,16,0,7); ctx.fill(); }
+      }
+      const img=tr.armed?this.spr.trapArmed:this.spr.trapSprung, s=TILE*0.72;
+      ctx.drawImage(img, x-s/2, y-s/2, s, s);
+    }
+  }
   _renderItems(ctx){
     const t=this.t; const img=this.spr.key; const S=2, w=img.width*S, h=img.height*S;
     for(const k of this.world.keys){ if(k.taken) continue;
@@ -978,8 +1084,14 @@ class Game {
   }
 
   _renderParticles(ctx){
-    for(const p of this.particles){ ctx.globalAlpha=clamp(p.life/p.max,0,1);
-      ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill(); }
+    for(const p of this.particles){ const a=clamp(p.life/p.max,0,1);
+      if(p.glow){ ctx.globalCompositeOperation="lighter";
+        ctx.globalAlpha=a*(0.45+0.55*Math.sin(this.t*6+p.x));
+        const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,p.r*4);
+        g.addColorStop(0,p.color); g.addColorStop(1,"rgba(0,0,0,0)");
+        ctx.fillStyle=g; ctx.beginPath(); ctx.arc(p.x,p.y,p.r*4,0,7); ctx.fill();
+        ctx.globalCompositeOperation="source-over"; continue; }
+      ctx.globalAlpha=a; ctx.fillStyle=p.color; ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,7); ctx.fill(); }
     ctx.globalAlpha=1;
   }
 
@@ -1006,7 +1118,8 @@ class Game {
     // visión actual: halo cálido degradado centrado en el jugador (aditivo)
     lc.globalCompositeOperation="lighter";
     const px=(p.x-camx)*ZOOM, py=(p.y-camy)*ZOOM;
-    const R=(p.sprinting?210:255)*ZOOM;
+    const flick=1+Math.sin(this.t*23)*0.012+Math.sin(this.t*6.7)*0.02; // titileo sutil de la linterna
+    const R=(p.sprinting?210:255)*ZOOM*flick;
     const halo=lc.createRadialGradient(px,py,10,px,py,R);
     halo.addColorStop(0,"rgba(255,248,232,1)");
     halo.addColorStop(0.5,"rgba(200,200,205,0.6)");

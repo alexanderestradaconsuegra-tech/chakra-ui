@@ -26,6 +26,14 @@ También funciona en **móvil/táctil** (joystick virtual + botón USAR).
 3. Llega al **Portón de Salida** y escapa. Salir es lo difícil: cada llave que
    recoges **enfurece al Verdugo y lo hace más rápido**.
 
+> ⚠️ **Cepos**: hay trampas repartidas por el bosque. Si las pisas te quedas
+> **atrapado** unos segundos (forcejea pulsando direcciones para soltarte) — y el
+> Verdugo se te echa encima. Pero también puedes **llevarlo a un cepo**: si él lo
+> pisa, queda inmovilizado más tiempo y puedes escapar.
+>
+> 🕗 Al empezar tienes unos segundos de **gracia**: el Verdugo deambula lento y no
+> caza hasta que "despierta".
+
 ## 🧠 Diseño técnico (lo interesante)
 
 - **IA del jefe — máquina de estados** `PATROL → HUNT → SEARCH`:
